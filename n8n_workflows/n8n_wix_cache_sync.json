@@ -1,0 +1,235 @@
+{
+  "name": "Wix Cache Sync — Bookings & Services → PostgreSQL",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "id": "wcs-schedule",
+      "name": "Every 6 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "path": "wix-cache-sync/trigger",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "wcs-manual-trigger",
+      "name": "Manual Trigger Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 500]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"status\": \"triggered\", \"message\": \"Wix Cache Sync started\", \"timestamp\": \"{{ $now.toISO() }}\" }",
+        "options": { "responseCode": 202 }
+      },
+      "id": "wcs-ack",
+      "name": "Acknowledge Trigger",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [460, 500]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://www.wixapis.com/bookings/v2/services/query",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "={{ $env.WIX_API_KEY }}" },
+            { "name": "wix-site-id", "value": "={{ $env.WIX_SITE_ID }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{ \"query\": { \"paging\": { \"limit\": 100 } } }",
+        "options": { "timeout": 20000 }
+      },
+      "id": "wcs-fetch-services",
+      "name": "Fetch Wix Services",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse services from Wix REST API v2 response\nconst raw = $input.first().json;\nconst services = raw.services || [];\n\nconst parsed = services.map(svc => ({\n  wix_id: svc.id || '',\n  service_type: svc.type || 'BOOKING_SERVICE',\n  title: svc.name || svc.info?.name || 'Unknown Service',\n  price: 0.0, // v2 API price is in paymentOptions, simplified here\n  status: svc.status || 'ACTIVE',\n  category: svc.category?.name || null,\n  duration: svc.schedule?.availabilityConstraints?.sessionDurations?.[0] || null\n}));\n\nreturn [{ json: { services: parsed, count: parsed.length } }];"
+      },
+      "id": "wcs-parse-services",
+      "name": "Parse Services",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://www.wixapis.com/bookings/v2/bookings/query",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "={{ $env.WIX_API_KEY }}" },
+            { "name": "wix-site-id", "value": "={{ $env.WIX_SITE_ID }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{ \"query\": { \"paging\": { \"limit\": 100, \"offset\": 0 }, \"sort\": [{ \"fieldName\": \"createdDate\", \"order\": \"DESC\" }] } }",
+        "options": { "timeout": 30000 }
+      },
+      "id": "wcs-fetch-bookings",
+      "name": "Fetch Wix Bookings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 500]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse bookings from Wix REST API v2 response\nconst raw = $input.first().json;\nconst bookings = raw.bookings || [];\nconst total = raw.pagingMetadata?.total || bookings.length;\n\nconst parsed = bookings.map(b => {\n  const details = b.contactDetails || {};\n  const contact_id = b.contactId || details.contactId || '';\n  const email = (details.email || '').trim().toLowerCase();\n  const wix_cid = contact_id || email;\n  const full_name = `${details.firstName || ''} ${details.lastName || ''}`.trim() || 'Guest';\n  const phone = details.phone || '';\n  const wix_service_id = b.bookedEntity?.slot?.serviceId || '';\n\n  // Price parsing — handle strings like \"EGP 600\"\n  let amount_paid = 0.0;\n  try {\n    const price_info = b.priceInfo || {};\n    const total_price_obj = price_info.totalPrice || {};\n    const raw_price = 'value' in total_price_obj ? total_price_obj.value : (price_info.totalPrice || 0);\n    if (typeof raw_price === 'string') {\n      const clean = raw_price.replace(/[^\\d.]/g, '');\n      amount_paid = clean ? parseFloat(clean) : 0.0;\n    } else {\n      amount_paid = parseFloat(raw_price) || 0.0;\n    }\n  } catch(e) { amount_paid = 0.0; }\n\n  return {\n    wix_booking_id: b.id || '',\n    wix_contact_id: wix_cid,\n    full_name, email, phone,\n    wix_service_id,\n    registration_date: b.createdDate || new Date().toISOString(),\n    amount_paid,\n    status: b.status || 'CONFIRMED'\n  };\n}).filter(b => b.wix_contact_id); // drop records with no identity\n\nreturn [{ json: { bookings: parsed, total, fetched: bookings.length } }];"
+      },
+      "id": "wcs-parse-bookings",
+      "name": "Parse Bookings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 500]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge services and bookings results into a single payload for the upsert endpoint\nconst services = $('Parse Services').first().json.services || [];\nconst bookings = $('Parse Bookings').first().json.bookings || [];\nconst total = $('Parse Bookings').first().json.total || 0;\n\nreturn [{\n  json: {\n    services,\n    bookings,\n    meta: {\n      sync_at: new Date().toISOString(),\n      services_count: services.length,\n      bookings_fetched: bookings.length,\n      bookings_total: total\n    }\n  }\n}];"
+      },
+      "id": "wcs-merge",
+      "name": "Merge Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://arlen-unsqueezed-carlee.ngrok-free.dev/api/sync/wix-cache",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": { "timeout": 60000 }
+      },
+      "id": "wcs-push-cabinet",
+      "name": "Push to Cabinet API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "const result = $input.first().json;\nconst meta = $('Merge Payload').first().json.meta;\n\nconst success = result.status === 'ok' || result.synced !== undefined;\nconst summary = {\n  status: success ? 'SUCCESS' : 'PARTIAL',\n  synced_at: meta.sync_at,\n  services_synced: result.services_synced ?? meta.services_count,\n  bookings_synced: result.bookings_synced ?? meta.bookings_fetched,\n  bookings_total_in_wix: meta.bookings_total,\n  error: result.error || null\n};\n\nconsole.log('[WixCacheSync]', JSON.stringify(summary));\nreturn [{ json: summary }];"
+      },
+      "id": "wcs-log-result",
+      "name": "Log Sync Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "SUCCESS",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ]
+        }
+      },
+      "id": "wcs-check-status",
+      "name": "Sync Successful?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1780, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// SUCCESS path — emit clean summary\nconst s = $json;\nreturn [{ json: {\n  result: 'ok',\n  message: `Wix Cache Sync complete: ${s.services_synced} services, ${s.bookings_synced} bookings synced at ${s.synced_at}`\n}}];"
+      },
+      "id": "wcs-done-ok",
+      "name": "Done — OK",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// FAILURE path — emit alert\nconst s = $json;\nreturn [{ json: {\n  result: 'error',\n  message: `Wix Cache Sync had issues at ${s.synced_at}. Error: ${s.error || 'unknown'}. Check Cabinet API logs.`\n}}];"
+      },
+      "id": "wcs-done-error",
+      "name": "Done — Error (Alert)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 500]
+    }
+  ],
+  "connections": {
+    "Every 6 Hours": {
+      "main": [[{ "node": "Fetch Wix Services", "type": "main", "index": 0 }]]
+    },
+    "Manual Trigger Webhook": {
+      "main": [
+        [{ "node": "Acknowledge Trigger", "type": "main", "index": 0 }],
+        [{ "node": "Fetch Wix Services", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch Wix Services": {
+      "main": [[{ "node": "Parse Services", "type": "main", "index": 0 }]]
+    },
+    "Parse Services": {
+      "main": [[{ "node": "Fetch Wix Bookings", "type": "main", "index": 0 }]]
+    },
+    "Fetch Wix Bookings": {
+      "main": [[{ "node": "Parse Bookings", "type": "main", "index": 0 }]]
+    },
+    "Parse Bookings": {
+      "main": [[{ "node": "Merge Payload", "type": "main", "index": 0 }]]
+    },
+    "Merge Payload": {
+      "main": [[{ "node": "Push to Cabinet API", "type": "main", "index": 0 }]]
+    },
+    "Push to Cabinet API": {
+      "main": [[{ "node": "Log Sync Result", "type": "main", "index": 0 }]]
+    },
+    "Log Sync Result": {
+      "main": [[{ "node": "Sync Successful?", "type": "main", "index": 0 }]]
+    },
+    "Sync Successful?": {
+      "main": [
+        [{ "node": "Done — OK", "type": "main", "index": 0 }],
+        [{ "node": "Done — Error (Alert)", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "tags": [
+    { "name": "sync" },
+    { "name": "wix" },
+    { "name": "cache" },
+    { "name": "production" }
+  ],
+  "meta": {
+    "description": "Syncs Wix Bookings and Services into PostgreSQL via the Cabinet API. Runs every 6 hours automatically. Manual trigger: POST /webhook/wix-cache-sync/trigger. Uses env vars WIX_API_KEY + WIX_SITE_ID. Push target: Cabinet API /api/sync/wix-cache endpoint."
+  },
+  "id": "wcs-8820"
+}

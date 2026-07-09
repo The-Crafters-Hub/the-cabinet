@@ -1,0 +1,10 @@
+.env
+secrets/
+*.key
+*.pem
+data/
+logs/
+__pycache__/
+*.pyc
+.venv/
+node_modules/

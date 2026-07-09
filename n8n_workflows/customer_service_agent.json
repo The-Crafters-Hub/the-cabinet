@@ -1,0 +1,1473 @@
+{
+    "updatedAt": "2026-05-15T22:37:16.674Z",
+    "createdAt": "2026-05-15T20:50:24.962Z",
+    "id": "YDWv38Q7OnnFtNOx",
+    "name": "Customer Service Agent (Meta Native)",
+    "description": null,
+    "active": true,
+    "isArchived": false,
+    "nodes": [
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "customer-service",
+                "responseMode": "responseNode",
+                "options": {
+                    "rawBody": true
+                }
+            },
+            "id": "9b854494-e567-46ff-a49d-bc73c7e9be24",
+            "name": "Meta WhatsApp POST",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 1,
+            "position": [
+                0,
+                208
+            ],
+            "webhookId": "57cf3329-0da2-4428-a634-f3f091227ec5"
+        },
+        {
+            "parameters": {
+                "path": "customer-service",
+                "responseMode": "responseNode",
+                "options": {}
+            },
+            "id": "dde6e129-8768-4beb-b3e7-410935245dfe",
+            "name": "Meta Webhook Verify (GET)",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 1,
+            "position": [
+                0,
+                0
+            ],
+            "webhookId": "e6f0d37c-6fec-48b5-9816-a51eccebf481"
+        },
+        {
+            "parameters": {
+                "respondWith": "text",
+                "responseBody": "={{ $json.query['hub.challenge'] }}",
+                "options": {
+                    "responseCode": 200
+                }
+            },
+            "id": "8f9dae4e-23bf-4869-b99f-e6ba16c616ee",
+            "name": "Return Challenge",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1.1,
+            "position": [
+                224,
+                0
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "// Handle both n8n v2 webhook (body in .json.body) and direct JSON\nconst raw = $input.first().json;\nconst body = typeof raw.body === 'string' ? JSON.parse(raw.body) : (raw.body ?? raw);\n\n// Safe extraction of Meta WhatsApp Payload\nlet message = '';\nlet phone = '';\nlet is_message = false;\n\ntry {\n  if (body.entry && body.entry[0].changes && body.entry[0].changes[0].value.messages) {\n    const msgObj = body.entry[0].changes[0].value.messages[0];\n    if (msgObj.type === 'text') {\n      message = msgObj.text.body;\n      phone = msgObj.from;\n      is_message = true;\n    }\n  }\n} catch(e) {}\n\nreturn [{ json: { message: message, phone: phone, is_message: is_message } }];"
+            },
+            "id": "b3201b32-1a06-4b1e-8d5a-337c9b66794d",
+            "name": "Extract Meta Payload",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                432,
+                208
+            ]
+        },
+        {
+            "parameters": {
+                "respondWith": "json",
+                "responseBody": "{\"status\": \"ok\"}",
+                "options": {
+                    "responseCode": 200
+                }
+            },
+            "id": "4df814c6-1e7e-40a9-b0ce-b36bc6c947aa",
+            "name": "Respond 200 OK",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1.1,
+            "position": [
+                880,
+                400
+            ]
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "conditions": [
+                        {
+                            "leftValue": "={{ $json.is_message }}",
+                            "rightValue": true,
+                            "operator": {
+                                "type": "boolean",
+                                "operation": "equals"
+                            }
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "fd1e6fb7-d5f8-4e18-b023-09dc5318acc5",
+            "name": "Is Text Message?",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 2,
+            "position": [
+                656,
+                208
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ \"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=\" + $env.GEMINI_API_KEY }}",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "value": "application/json",
+                            "name": "Content-Type"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={{ JSON.stringify({ contents: [{ parts: [{ text: 'You are a query rewriter for The Crafters Hub, a woodworking workshop in Egypt. Take this raw customer message (may be Arabic, English, or Franco-Arabic) and rewrite as clean English search query. Rules: 1) Translate Arabic/Franco-Arabic to English 2) Remove greetings/filler/emojis 3) Extract core intent 4) Output ONLY the rewritten query 5) If just a greeting, output: GREETING_ONLY. Message: ' + $json.message }] }], generationConfig: { maxOutputTokens: 60, temperature: 0.1 } }) }}",
+                "options": {
+                    "timeout": 10000
+                }
+            },
+            "id": "0fbf389d-e581-408e-bc2f-3415ab416699",
+            "name": "Rewrite Query (Flash)",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                880,
+                224
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const raw = $input.first().json;\nconst phone = $('Extract Meta Payload').first().json.phone;\nconst original = $('Extract Meta Payload').first().json.message;\nconst rewritten = raw.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || 'REWRITE_FAILED';\nconst isGreeting = rewritten === 'GREETING_ONLY';\n\nreturn [{ json: { original_message: original, phone: phone, rewritten_query: rewritten, is_greeting: isGreeting } }];"
+            },
+            "id": "2d0ebf88-5948-41d8-a3fe-b5d8aae38b41",
+            "name": "Parse Rewrite",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1088,
+                224
+            ]
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "conditions": [
+                        {
+                            "leftValue": "={{ $json.is_greeting }}",
+                            "rightValue": true,
+                            "operator": {
+                                "type": "boolean",
+                                "operation": "equals"
+                            }
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "dc3b547b-9085-4d4b-9e1b-1d2547674f8d",
+            "name": "Is Greeting?",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 2,
+            "position": [
+                1312,
+                224
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ \"https://graph.facebook.com/v20.0/\" + $env.WHATSAPP_PHONE_NUMBER_ID + \"/messages\" }}",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Authorization",
+                            "value": "={{ \"Bearer \" + $env.META_ACCESS_TOKEN }}"
+                        },
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: $('Parse Rewrite').first().json.phone, type: 'text', text: { body: 'Welcome to The Crafters Hub! ?? How can I help you today? You can ask about our courses, workshops, pricing, or schedule.' } }) }}",
+                "options": {}
+            },
+            "id": "7129a7a0-4b27-4092-8ccc-c7bf188314fa",
+            "name": "Send WhatsApp Greeting",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                1536,
+                80
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ \"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=\" + $env.GEMINI_API_KEY }}",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "value": "application/json",
+                            "name": "Content-Type"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={{ JSON.stringify({ contents: [{ parts: [{ text: 'Classify this customer query into one of: [faq, booking, complaint, feedback, pdpl_request, other]. Query: ' + $json.rewritten_query + '. Respond with ONLY the category name.' }] }], generationConfig: { maxOutputTokens: 20 } }) }}",
+                "options": {
+                    "timeout": 10000
+                }
+            },
+            "id": "da4209a4-3e0b-40d8-a619-28797ea00403",
+            "name": "Classify Intent (Flash)",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                1536,
+                320
+            ]
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "conditions": [
+                        {
+                            "leftValue": "={{ $json.candidates ? $json.candidates[0].content.parts[0].text.trim().toLowerCase() : '' }}",
+                            "rightValue": "faq",
+                            "operator": {
+                                "type": "string",
+                                "operation": "contains"
+                            }
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "a58e4796-4dee-4ff7-9284-e03eb7fa6c0c",
+            "name": "Is FAQ?",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 2,
+            "position": [
+                1760,
+                320
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ \"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=\" + $env.GEMINI_API_KEY }}",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "value": "application/json",
+                            "name": "Content-Type"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={{ JSON.stringify({ contents: [{ parts: [{ text: 'You are a friendly customer service agent for The Crafters Hub woodworking workshop in Egypt. Answer this question helpfully and concisely in Arabic: ' + $('Parse Rewrite').first().json.rewritten_query }] }], generationConfig: { maxOutputTokens: 256 } }) }}",
+                "options": {
+                    "timeout": 30000
+                }
+            },
+            "id": "929f373e-21ee-417c-8151-98cf0cd9e24b",
+            "name": "Answer FAQ (Flash)",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                1968,
+                224
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ \"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=\" + $env.GEMINI_API_KEY }}",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "value": "application/json",
+                            "name": "Content-Type"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={{ JSON.stringify({ contents: [{ parts: [{ text: 'You are a professional customer service agent for The Crafters Hub. Handle this complex request with care in Arabic. Original message: ' + $('Parse Rewrite').first().json.original_message + '. Interpreted as: ' + $('Parse Rewrite').first().json.rewritten_query }] }], generationConfig: { maxOutputTokens: 512 } }) }}",
+                "options": {
+                    "timeout": 30000
+                }
+            },
+            "id": "ce0e0bf0-2906-43e3-8ca7-e8ac906d6881",
+            "name": "Handle Complex (Flash)",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                1968,
+                432
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ \"https://graph.facebook.com/v20.0/\" + $env.WHATSAPP_PHONE_NUMBER_ID + \"/messages\" }}",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Authorization",
+                            "value": "={{ \"Bearer \" + $env.META_ACCESS_TOKEN }}"
+                        },
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: $('Parse Rewrite').first().json.phone, type: 'text', text: { body: $json.candidates ? $json.candidates[0].content.parts[0].text : '????? ??? ???? ???? ???????? ??? ????.' } }) }}",
+                "options": {}
+            },
+            "id": "1e7256c3-117b-46da-bced-0b4fe93352af",
+            "name": "Send WhatsApp FAQ",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                2192,
+                224
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ \"https://graph.facebook.com/v20.0/\" + $env.WHATSAPP_PHONE_NUMBER_ID + \"/messages\" }}",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Authorization",
+                            "value": "={{ \"Bearer \" + $env.META_ACCESS_TOKEN }}"
+                        },
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: $('Parse Rewrite').first().json.phone, type: 'text', text: { body: $json.candidates ? $json.candidates[0].content.parts[0].text : '????? ??????? ???? ????? ???? ???????.' } }) }}",
+                "options": {}
+            },
+            "id": "84599c8b-cbac-4624-a530-8114a1ed47b4",
+            "name": "Send WhatsApp Complex",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                2192,
+                432
+            ]
+        },
+        {
+            "parameters": {
+                "respondWith": "json",
+                "responseBody": "{\"status\": \"greeting_sent\"}",
+                "options": {
+                    "responseCode": 200
+                }
+            },
+            "id": "da0afc2a-82a8-4249-8612-f54a82c26eab",
+            "name": "Respond After Greeting",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1.1,
+            "position": [
+                2416,
+                80
+            ]
+        },
+        {
+            "parameters": {
+                "respondWith": "json",
+                "responseBody": "{\"status\": \"faq_sent\"}",
+                "options": {
+                    "responseCode": 200
+                }
+            },
+            "id": "22ebaf34-6524-493f-8523-20ebcd841cb1",
+            "name": "Respond After FAQ",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1.1,
+            "position": [
+                2416,
+                224
+            ]
+        },
+        {
+            "parameters": {
+                "respondWith": "json",
+                "responseBody": "{\"status\": \"complex_sent\"}",
+                "options": {
+                    "responseCode": 200
+                }
+            },
+            "id": "cb90e6f9-22be-428c-88c5-41ab7474fc63",
+            "name": "Respond After Complex",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1.1,
+            "position": [
+                2416,
+                432
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const crypto = require('crypto');\nconst item = $input.first();\nconst headers = item.json.headers;\nconst rawBody = typeof item.json.body === 'string' ? item.json.body : JSON.stringify(item.json.body);\nconst signatureHeader = headers['x-hub-signature-256'];\n\n// Modern n8n environment variable access\nconst secret = $env.META_APP_SECRET;\n\nif (!secret) throw new Error(\"META_APP_SECRET env var is missing in n8n!\");\nif (!signatureHeader) throw new Error(\"Missing x-hub-signature-256 header!\");\n\nconst expectedSignature = 'sha256=' + crypto.createHmac('sha256', secret).update(rawBody).digest('hex');\n\n// 2026 SECURE BEST PRACTICE: Prevent timing attacks\nconst a = Buffer.from(signatureHeader);\nconst b = Buffer.from(expectedSignature);\n\nif (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {\n    throw new Error(\"Signature mismatch! Potential webhook forgery.\");\n}\n\nreturn $input.all();",
+                "mode": "runOnceForAllItems"
+            },
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                208,
+                208
+            ],
+            "id": "6c0e51a4-b9a0-4d29-b6d0-f5049ad44e75",
+            "name": "Signature Validtor"
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "conditions": [
+                        {
+                            "leftValue": "={{ $json.candidates ? $json.candidates[0].content.parts[0].text.trim().toLowerCase() : '' }}",
+                            "rightValue": "pdpl_request",
+                            "operator": {
+                                "type": "string",
+                                "operation": "contains"
+                            }
+                        }
+                    ]
+                }
+            },
+            "id": "is-pdpl-node",
+            "name": "Is PDPL?",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 2,
+            "position": [
+                1760,
+                100
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "http://n8n:5678/webhook/pdpl-rights",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={{ JSON.stringify($('Signature Validtor').first().json) }}",
+                "options": {
+                    "timeout": 5000
+                }
+            },
+            "id": "forward-pdpl-handler",
+            "name": "Forward to PDPL Handler",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                2000,
+                50
+            ],
+            "continueOnFail": true
+        },
+        {
+            "parameters": {
+                "respondWith": "json",
+                "responseBody": "{\"status\": \"pdpl_processed\"}",
+                "options": {
+                    "responseCode": 200
+                }
+            },
+            "id": "respond-pdpl",
+            "name": "Respond After PDPL",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1.1,
+            "position": [
+                2250,
+                50
+            ]
+        }
+    ],
+    "connections": {
+        "Meta Webhook Verify (GET)": {
+            "main": [
+                [
+                    {
+                        "node": "Return Challenge",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Meta WhatsApp POST": {
+            "main": [
+                [
+                    {
+                        "node": "Signature Validtor",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Extract Meta Payload": {
+            "main": [
+                [
+                    {
+                        "node": "Is Text Message?",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Is Text Message?": {
+            "main": [
+                [
+                    {
+                        "node": "Rewrite Query (Flash)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Respond 200 OK",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Rewrite Query (Flash)": {
+            "main": [
+                [
+                    {
+                        "node": "Parse Rewrite",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Parse Rewrite": {
+            "main": [
+                [
+                    {
+                        "node": "Is Greeting?",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Is Greeting?": {
+            "main": [
+                [
+                    {
+                        "node": "Send WhatsApp Greeting",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Classify Intent (Flash)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Classify Intent (Flash)": {
+            "main": [
+                [
+                    {
+                        "node": "Is PDPL?",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Is FAQ?": {
+            "main": [
+                [
+                    {
+                        "node": "Answer FAQ (Flash)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Handle Complex (Flash)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Send WhatsApp Greeting": {
+            "main": [
+                [
+                    {
+                        "node": "Respond After Greeting",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Answer FAQ (Flash)": {
+            "main": [
+                [
+                    {
+                        "node": "Send WhatsApp FAQ",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Handle Complex (Flash)": {
+            "main": [
+                [
+                    {
+                        "node": "Send WhatsApp Complex",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Send WhatsApp FAQ": {
+            "main": [
+                [
+                    {
+                        "node": "Respond After FAQ",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Send WhatsApp Complex": {
+            "main": [
+                [
+                    {
+                        "node": "Respond After Complex",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Signature Validtor": {
+            "main": [
+                [
+                    {
+                        "node": "Extract Meta Payload",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Is PDPL?": {
+            "main": [
+                [
+                    {
+                        "node": "Forward to PDPL Handler",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Is FAQ?",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Forward to PDPL Handler": {
+            "main": [
+                [
+                    {
+                        "node": "Respond After PDPL",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "settings": {
+        "executionOrder": "v1",
+        "binaryMode": "separate",
+        "availableInMCP": false,
+        "callerPolicy": "workflowsFromSameOwner"
+    },
+    "staticData": null,
+    "meta": null,
+    "pinData": {},
+    "versionId": "6b471d0e-1495-4570-9ec4-286407291e9e",
+    "activeVersionId": "6b471d0e-1495-4570-9ec4-286407291e9e",
+    "versionCounter": 67,
+    "triggerCount": 2,
+    "shared": [
+        {
+            "updatedAt": "2026-05-15T20:50:24.968Z",
+            "createdAt": "2026-05-15T20:50:24.968Z",
+            "role": "workflow:owner",
+            "workflowId": "YDWv38Q7OnnFtNOx",
+            "projectId": "lg8uMl3hkjXDyxLD",
+            "project": {
+                "updatedAt": "2026-03-25T19:46:07.089Z",
+                "createdAt": "2026-03-25T19:43:36.144Z",
+                "id": "lg8uMl3hkjXDyxLD",
+                "name": "Hosam Elshanawany <alshanawanyhosam@gmail.com>",
+                "type": "personal",
+                "icon": null,
+                "description": null,
+                "creatorId": "989edd20-e600-470e-8ef9-bfb9ea66657a"
+            }
+        }
+    ],
+    "tags": [
+        {
+            "updatedAt": "2026-04-06T21:57:47.951Z",
+            "createdAt": "2026-04-06T21:57:47.951Z",
+            "id": "PGxzyMa1G4eBp1L1",
+            "name": "ai-agent"
+        },
+        {
+            "updatedAt": "2026-04-01T01:43:45.063Z",
+            "createdAt": "2026-04-01T01:43:45.063Z",
+            "id": "nbXTBJgfa7YbhK2j",
+            "name": "production"
+        },
+        {
+            "updatedAt": "2026-04-06T21:57:47.947Z",
+            "createdAt": "2026-04-06T21:57:47.947Z",
+            "id": "nv6fZN9L7ZMwpL6i",
+            "name": "customer-service"
+        }
+    ],
+    "activeVersion": {
+        "updatedAt": "2026-05-15T22:37:16.676Z",
+        "createdAt": "2026-05-15T22:37:16.676Z",
+        "versionId": "6b471d0e-1495-4570-9ec4-286407291e9e",
+        "workflowId": "YDWv38Q7OnnFtNOx",
+        "nodes": [
+            {
+                "parameters": {
+                    "httpMethod": "POST",
+                    "path": "customer-service",
+                    "responseMode": "responseNode",
+                    "options": {
+                        "rawBody": true
+                    }
+                },
+                "id": "9b854494-e567-46ff-a49d-bc73c7e9be24",
+                "name": "Meta WhatsApp POST",
+                "type": "n8n-nodes-base.webhook",
+                "typeVersion": 1,
+                "position": [
+                    0,
+                    208
+                ],
+                "webhookId": "57cf3329-0da2-4428-a634-f3f091227ec5"
+            },
+            {
+                "parameters": {
+                    "path": "customer-service",
+                    "responseMode": "responseNode",
+                    "options": {}
+                },
+                "id": "dde6e129-8768-4beb-b3e7-410935245dfe",
+                "name": "Meta Webhook Verify (GET)",
+                "type": "n8n-nodes-base.webhook",
+                "typeVersion": 1,
+                "position": [
+                    0,
+                    0
+                ],
+                "webhookId": "e6f0d37c-6fec-48b5-9816-a51eccebf481"
+            },
+            {
+                "parameters": {
+                    "respondWith": "text",
+                    "responseBody": "={{ $json.query['hub.challenge'] }}",
+                    "options": {
+                        "responseCode": 200
+                    }
+                },
+                "id": "8f9dae4e-23bf-4869-b99f-e6ba16c616ee",
+                "name": "Return Challenge",
+                "type": "n8n-nodes-base.respondToWebhook",
+                "typeVersion": 1.1,
+                "position": [
+                    224,
+                    0
+                ]
+            },
+            {
+                "parameters": {
+                    "jsCode": "// Handle both n8n v2 webhook (body in .json.body) and direct JSON\nconst raw = $input.first().json;\nconst body = typeof raw.body === 'string' ? JSON.parse(raw.body) : (raw.body ?? raw);\n\n// Safe extraction of Meta WhatsApp Payload\nlet message = '';\nlet phone = '';\nlet is_message = false;\n\ntry {\n  if (body.entry && body.entry[0].changes && body.entry[0].changes[0].value.messages) {\n    const msgObj = body.entry[0].changes[0].value.messages[0];\n    if (msgObj.type === 'text') {\n      message = msgObj.text.body;\n      phone = msgObj.from;\n      is_message = true;\n    }\n  }\n} catch(e) {}\n\nreturn [{ json: { message: message, phone: phone, is_message: is_message } }];"
+                },
+                "id": "b3201b32-1a06-4b1e-8d5a-337c9b66794d",
+                "name": "Extract Meta Payload",
+                "type": "n8n-nodes-base.code",
+                "typeVersion": 2,
+                "position": [
+                    432,
+                    208
+                ]
+            },
+            {
+                "parameters": {
+                    "respondWith": "json",
+                    "responseBody": "{\"status\": \"ok\"}",
+                    "options": {
+                        "responseCode": 200
+                    }
+                },
+                "id": "4df814c6-1e7e-40a9-b0ce-b36bc6c947aa",
+                "name": "Respond 200 OK",
+                "type": "n8n-nodes-base.respondToWebhook",
+                "typeVersion": 1.1,
+                "position": [
+                    880,
+                    400
+                ]
+            },
+            {
+                "parameters": {
+                    "conditions": {
+                        "conditions": [
+                            {
+                                "leftValue": "={{ $json.is_message }}",
+                                "rightValue": true,
+                                "operator": {
+                                    "type": "boolean",
+                                    "operation": "equals"
+                                }
+                            }
+                        ]
+                    },
+                    "options": {}
+                },
+                "id": "fd1e6fb7-d5f8-4e18-b023-09dc5318acc5",
+                "name": "Is Text Message?",
+                "type": "n8n-nodes-base.if",
+                "typeVersion": 2,
+                "position": [
+                    656,
+                    208
+                ]
+            },
+            {
+                "parameters": {
+                    "method": "POST",
+                    "url": "={{ \"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=\" + $env.GEMINI_API_KEY }}",
+                    "sendHeaders": true,
+                    "headerParameters": {
+                        "parameters": [
+                            {
+                                "value": "application/json",
+                                "name": "Content-Type"
+                            }
+                        ]
+                    },
+                    "sendBody": true,
+                    "specifyBody": "json",
+                    "jsonBody": "={{ JSON.stringify({ contents: [{ parts: [{ text: 'You are a query rewriter for The Crafters Hub, a woodworking workshop in Egypt. Take this raw customer message (may be Arabic, English, or Franco-Arabic) and rewrite as clean English search query. Rules: 1) Translate Arabic/Franco-Arabic to English 2) Remove greetings/filler/emojis 3) Extract core intent 4) Output ONLY the rewritten query 5) If just a greeting, output: GREETING_ONLY. Message: ' + $json.message }] }], generationConfig: { maxOutputTokens: 60, temperature: 0.1 } }) }}",
+                    "options": {
+                        "timeout": 10000
+                    }
+                },
+                "id": "0fbf389d-e581-408e-bc2f-3415ab416699",
+                "name": "Rewrite Query (Flash)",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [
+                    880,
+                    224
+                ]
+            },
+            {
+                "parameters": {
+                    "jsCode": "const raw = $input.first().json;\nconst phone = $('Extract Meta Payload').first().json.phone;\nconst original = $('Extract Meta Payload').first().json.message;\nconst rewritten = raw.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || 'REWRITE_FAILED';\nconst isGreeting = rewritten === 'GREETING_ONLY';\n\nreturn [{ json: { original_message: original, phone: phone, rewritten_query: rewritten, is_greeting: isGreeting } }];"
+                },
+                "id": "2d0ebf88-5948-41d8-a3fe-b5d8aae38b41",
+                "name": "Parse Rewrite",
+                "type": "n8n-nodes-base.code",
+                "typeVersion": 2,
+                "position": [
+                    1088,
+                    224
+                ]
+            },
+            {
+                "parameters": {
+                    "conditions": {
+                        "conditions": [
+                            {
+                                "leftValue": "={{ $json.is_greeting }}",
+                                "rightValue": true,
+                                "operator": {
+                                    "type": "boolean",
+                                    "operation": "equals"
+                                }
+                            }
+                        ]
+                    },
+                    "options": {}
+                },
+                "id": "dc3b547b-9085-4d4b-9e1b-1d2547674f8d",
+                "name": "Is Greeting?",
+                "type": "n8n-nodes-base.if",
+                "typeVersion": 2,
+                "position": [
+                    1312,
+                    224
+                ]
+            },
+            {
+                "parameters": {
+                    "method": "POST",
+                    "url": "={{ \"https://graph.facebook.com/v20.0/\" + $env.WHATSAPP_PHONE_NUMBER_ID + \"/messages\" }}",
+                    "sendHeaders": true,
+                    "headerParameters": {
+                        "parameters": [
+                            {
+                                "name": "Authorization",
+                                "value": "={{ \"Bearer \" + $env.META_ACCESS_TOKEN }}"
+                            },
+                            {
+                                "name": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ]
+                    },
+                    "sendBody": true,
+                    "specifyBody": "json",
+                    "jsonBody": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: $('Parse Rewrite').first().json.phone, type: 'text', text: { body: 'Welcome to The Crafters Hub! ?? How can I help you today? You can ask about our courses, workshops, pricing, or schedule.' } }) }}",
+                    "options": {}
+                },
+                "id": "7129a7a0-4b27-4092-8ccc-c7bf188314fa",
+                "name": "Send WhatsApp Greeting",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [
+                    1536,
+                    80
+                ]
+            },
+            {
+                "parameters": {
+                    "method": "POST",
+                    "url": "={{ \"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=\" + $env.GEMINI_API_KEY }}",
+                    "sendHeaders": true,
+                    "headerParameters": {
+                        "parameters": [
+                            {
+                                "value": "application/json",
+                                "name": "Content-Type"
+                            }
+                        ]
+                    },
+                    "sendBody": true,
+                    "specifyBody": "json",
+                    "jsonBody": "={{ JSON.stringify({ contents: [{ parts: [{ text: 'Classify this customer query into one of: [faq, booking, complaint, feedback, other]. Query: ' + $json.rewritten_query + '. Respond with ONLY the category name.' }] }], generationConfig: { maxOutputTokens: 20 } }) }}",
+                    "options": {
+                        "timeout": 10000
+                    }
+                },
+                "id": "da4209a4-3e0b-40d8-a619-28797ea00403",
+                "name": "Classify Intent (Flash)",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [
+                    1536,
+                    320
+                ]
+            },
+            {
+                "parameters": {
+                    "conditions": {
+                        "conditions": [
+                            {
+                                "leftValue": "={{ $json.candidates ? $json.candidates[0].content.parts[0].text.trim().toLowerCase() : '' }}",
+                                "rightValue": "faq",
+                                "operator": {
+                                    "type": "string",
+                                    "operation": "contains"
+                                }
+                            }
+                        ]
+                    },
+                    "options": {}
+                },
+                "id": "a58e4796-4dee-4ff7-9284-e03eb7fa6c0c",
+                "name": "Is FAQ?",
+                "type": "n8n-nodes-base.if",
+                "typeVersion": 2,
+                "position": [
+                    1760,
+                    320
+                ]
+            },
+            {
+                "parameters": {
+                    "method": "POST",
+                    "url": "={{ \"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=\" + $env.GEMINI_API_KEY }}",
+                    "sendHeaders": true,
+                    "headerParameters": {
+                        "parameters": [
+                            {
+                                "value": "application/json",
+                                "name": "Content-Type"
+                            }
+                        ]
+                    },
+                    "sendBody": true,
+                    "specifyBody": "json",
+                    "jsonBody": "={{ JSON.stringify({ contents: [{ parts: [{ text: 'You are a friendly customer service agent for The Crafters Hub woodworking workshop in Egypt. Answer this question helpfully and concisely in Arabic: ' + $('Parse Rewrite').first().json.rewritten_query }] }], generationConfig: { maxOutputTokens: 256 } }) }}",
+                    "options": {
+                        "timeout": 30000
+                    }
+                },
+                "id": "929f373e-21ee-417c-8151-98cf0cd9e24b",
+                "name": "Answer FAQ (Flash)",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [
+                    1968,
+                    224
+                ]
+            },
+            {
+                "parameters": {
+                    "method": "POST",
+                    "url": "={{ \"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=\" + $env.GEMINI_API_KEY }}",
+                    "sendHeaders": true,
+                    "headerParameters": {
+                        "parameters": [
+                            {
+                                "value": "application/json",
+                                "name": "Content-Type"
+                            }
+                        ]
+                    },
+                    "sendBody": true,
+                    "specifyBody": "json",
+                    "jsonBody": "={{ JSON.stringify({ contents: [{ parts: [{ text: 'You are a professional customer service agent for The Crafters Hub. Handle this complex request with care in Arabic. Original message: ' + $('Parse Rewrite').first().json.original_message + '. Interpreted as: ' + $('Parse Rewrite').first().json.rewritten_query }] }], generationConfig: { maxOutputTokens: 512 } }) }}",
+                    "options": {
+                        "timeout": 30000
+                    }
+                },
+                "id": "ce0e0bf0-2906-43e3-8ca7-e8ac906d6881",
+                "name": "Handle Complex (Flash)",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [
+                    1968,
+                    432
+                ]
+            },
+            {
+                "parameters": {
+                    "method": "POST",
+                    "url": "={{ \"https://graph.facebook.com/v20.0/\" + $env.WHATSAPP_PHONE_NUMBER_ID + \"/messages\" }}",
+                    "sendHeaders": true,
+                    "headerParameters": {
+                        "parameters": [
+                            {
+                                "name": "Authorization",
+                                "value": "={{ \"Bearer \" + $env.META_ACCESS_TOKEN }}"
+                            },
+                            {
+                                "name": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ]
+                    },
+                    "sendBody": true,
+                    "specifyBody": "json",
+                    "jsonBody": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: $('Parse Rewrite').first().json.phone, type: 'text', text: { body: $json.candidates ? $json.candidates[0].content.parts[0].text : '????? ??? ???? ???? ???????? ??? ????.' } }) }}",
+                    "options": {}
+                },
+                "id": "1e7256c3-117b-46da-bced-0b4fe93352af",
+                "name": "Send WhatsApp FAQ",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [
+                    2192,
+                    224
+                ]
+            },
+            {
+                "parameters": {
+                    "method": "POST",
+                    "url": "={{ \"https://graph.facebook.com/v20.0/\" + $env.WHATSAPP_PHONE_NUMBER_ID + \"/messages\" }}",
+                    "sendHeaders": true,
+                    "headerParameters": {
+                        "parameters": [
+                            {
+                                "name": "Authorization",
+                                "value": "={{ \"Bearer \" + $env.META_ACCESS_TOKEN }}"
+                            },
+                            {
+                                "name": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ]
+                    },
+                    "sendBody": true,
+                    "specifyBody": "json",
+                    "jsonBody": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: $('Parse Rewrite').first().json.phone, type: 'text', text: { body: $json.candidates ? $json.candidates[0].content.parts[0].text : '????? ??????? ???? ????? ???? ???????.' } }) }}",
+                    "options": {}
+                },
+                "id": "84599c8b-cbac-4624-a530-8114a1ed47b4",
+                "name": "Send WhatsApp Complex",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [
+                    2192,
+                    432
+                ]
+            },
+            {
+                "parameters": {
+                    "respondWith": "json",
+                    "responseBody": "{\"status\": \"greeting_sent\"}",
+                    "options": {
+                        "responseCode": 200
+                    }
+                },
+                "id": "da0afc2a-82a8-4249-8612-f54a82c26eab",
+                "name": "Respond After Greeting",
+                "type": "n8n-nodes-base.respondToWebhook",
+                "typeVersion": 1.1,
+                "position": [
+                    2416,
+                    80
+                ]
+            },
+            {
+                "parameters": {
+                    "respondWith": "json",
+                    "responseBody": "{\"status\": \"faq_sent\"}",
+                    "options": {
+                        "responseCode": 200
+                    }
+                },
+                "id": "22ebaf34-6524-493f-8523-20ebcd841cb1",
+                "name": "Respond After FAQ",
+                "type": "n8n-nodes-base.respondToWebhook",
+                "typeVersion": 1.1,
+                "position": [
+                    2416,
+                    224
+                ]
+            },
+            {
+                "parameters": {
+                    "respondWith": "json",
+                    "responseBody": "{\"status\": \"complex_sent\"}",
+                    "options": {
+                        "responseCode": 200
+                    }
+                },
+                "id": "cb90e6f9-22be-428c-88c5-41ab7474fc63",
+                "name": "Respond After Complex",
+                "type": "n8n-nodes-base.respondToWebhook",
+                "typeVersion": 1.1,
+                "position": [
+                    2416,
+                    432
+                ]
+            },
+            {
+                "parameters": {
+                    "jsCode": "// Pass through - signature validation requires crypto module\n// TODO: Enable N8N_NODE_JS_TASK_RUNNER_ALLOWED_BUILTINS=crypto in env\nconst items = $input.all();\nreturn items;",
+                    "mode": "runOnceForAllItems"
+                },
+                "type": "n8n-nodes-base.code",
+                "typeVersion": 2,
+                "position": [
+                    208,
+                    208
+                ],
+                "id": "6c0e51a4-b9a0-4d29-b6d0-f5049ad44e75",
+                "name": "Signature Validtor"
+            }
+        ],
+        "connections": {
+            "Meta Webhook Verify (GET)": {
+                "main": [
+                    [
+                        {
+                            "node": "Return Challenge",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "Meta WhatsApp POST": {
+                "main": [
+                    [
+                        {
+                            "node": "Signature Validtor",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "Extract Meta Payload": {
+                "main": [
+                    [
+                        {
+                            "node": "Is Text Message?",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "Is Text Message?": {
+                "main": [
+                    [
+                        {
+                            "node": "Rewrite Query (Flash)",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ],
+                    [
+                        {
+                            "node": "Respond 200 OK",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "Rewrite Query (Flash)": {
+                "main": [
+                    [
+                        {
+                            "node": "Parse Rewrite",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "Parse Rewrite": {
+                "main": [
+                    [
+                        {
+                            "node": "Is Greeting?",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "Is Greeting?": {
+                "main": [
+                    [
+                        {
+                            "node": "Send WhatsApp Greeting",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ],
+                    [
+                        {
+                            "node": "Classify Intent (Flash)",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "Classify Intent (Flash)": {
+                "main": [
+                    [
+                        {
+                            "node": "Is FAQ?",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "Is FAQ?": {
+                "main": [
+                    [
+                        {
+                            "node": "Answer FAQ (Flash)",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ],
+                    [
+                        {
+                            "node": "Handle Complex (Flash)",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "Send WhatsApp Greeting": {
+                "main": [
+                    [
+                        {
+                            "node": "Respond After Greeting",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "Answer FAQ (Flash)": {
+                "main": [
+                    [
+                        {
+                            "node": "Send WhatsApp FAQ",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "Handle Complex (Flash)": {
+                "main": [
+                    [
+                        {
+                            "node": "Send WhatsApp Complex",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "Send WhatsApp FAQ": {
+                "main": [
+                    [
+                        {
+                            "node": "Respond After FAQ",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "Send WhatsApp Complex": {
+                "main": [
+                    [
+                        {
+                            "node": "Respond After Complex",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "Signature Validtor": {
+                "main": [
+                    [
+                        {
+                            "node": "Extract Meta Payload",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            }
+        },
+        "authors": "Hosam Elshanawany",
+        "name": null,
+        "description": null,
+        "autosaved": false,
+        "workflowPublishHistory": [
+            {
+                "createdAt": "2026-05-15T22:37:16.763Z",
+                "id": 170,
+                "workflowId": "YDWv38Q7OnnFtNOx",
+                "versionId": "6b471d0e-1495-4570-9ec4-286407291e9e",
+                "event": "activated",
+                "userId": "989edd20-e600-470e-8ef9-bfb9ea66657a"
+            },
+            {
+                "createdAt": "2026-05-15T22:37:17.895Z",
+                "id": 172,
+                "workflowId": "YDWv38Q7OnnFtNOx",
+                "versionId": "6b471d0e-1495-4570-9ec4-286407291e9e",
+                "event": "activated",
+                "userId": "989edd20-e600-470e-8ef9-bfb9ea66657a"
+            },
+            {
+                "createdAt": "2026-05-15T22:37:16.732Z",
+                "id": 169,
+                "workflowId": "YDWv38Q7OnnFtNOx",
+                "versionId": "6b471d0e-1495-4570-9ec4-286407291e9e",
+                "event": "deactivated",
+                "userId": "989edd20-e600-470e-8ef9-bfb9ea66657a"
+            },
+            {
+                "createdAt": "2026-05-15T22:37:16.828Z",
+                "id": 171,
+                "workflowId": "YDWv38Q7OnnFtNOx",
+                "versionId": "6b471d0e-1495-4570-9ec4-286407291e9e",
+                "event": "deactivated",
+                "userId": "989edd20-e600-470e-8ef9-bfb9ea66657a"
+            }
+        ]
+    }
+}

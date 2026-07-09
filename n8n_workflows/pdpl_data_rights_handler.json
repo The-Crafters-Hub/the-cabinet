@@ -1,0 +1,170 @@
+{
+  "name": "PDPL - Data Rights Handler",
+  "nodes": [
+    {
+      "id": "webhook-pdpl",
+      "name": "WhatsApp Inbound Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "pdpl-rights-001",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pdpl-rights",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "extract-intent",
+      "name": "Extract Phone + Intent",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 300],
+      "parameters": {
+        "jsCode": "// Extract phone number and detect PDPL intent from WhatsApp payload\nconst body = $input.first().json;\n\nlet phone = '';\nlet messageText = '';\n\ntry {\n  const entry = body.entry?.[0];\n  const change = entry?.changes?.[0];\n  const msg = change?.value?.messages?.[0];\n  const contact = change?.value?.contacts?.[0];\n  phone = msg?.from || contact?.wa_id || '';\n  messageText = (msg?.text?.body || '').trim().toLowerCase();\n} catch(e) {\n  phone = '';\n  messageText = '';\n}\n\n// Detect intent\nconst deleteKeywords = ['delete my data', 'احذف بياناتي', 'delete data', 'remove my data', 'امسح بياناتي', 'حذف البيانات'];\nconst accessKeywords = ['show my data', 'my data', 'بياناتي', 'show data', 'what data', 'ما بياناتي', 'اظهر بياناتي'];\nconst optoutKeywords = ['stop', 'unsubscribe', 'opt out', 'لا اريد', 'ايقاف', 'الغاء'];\n\nlet intent = 'unknown';\nif (deleteKeywords.some(k => messageText.includes(k))) intent = 'DELETE';\nelse if (accessKeywords.some(k => messageText.includes(k))) intent = 'ACCESS';\nelse if (optoutKeywords.some(k => messageText.includes(k))) intent = 'OPTOUT';\n\nreturn [{ json: { phone, messageText, intent, rawBody: body } }];"
+      }
+    },
+    {
+      "id": "route-intent",
+      "name": "Route by Intent",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [690, 300],
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            { "conditions": { "options": { "caseSensitive": false }, "conditions": [{ "leftValue": "={{ $json.intent }}", "rightValue": "DELETE", "operator": { "type": "string", "operation": "equals" } }] }, "renameOutput": true, "outputKey": "delete" },
+            { "conditions": { "options": { "caseSensitive": false }, "conditions": [{ "leftValue": "={{ $json.intent }}", "rightValue": "ACCESS", "operator": { "type": "string", "operation": "equals" } }] }, "renameOutput": true, "outputKey": "access" },
+            { "conditions": { "options": { "caseSensitive": false }, "conditions": [{ "leftValue": "={{ $json.intent }}", "rightValue": "OPTOUT", "operator": { "type": "string", "operation": "equals" } }] }, "renameOutput": true, "outputKey": "optout" }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "delete-data",
+      "name": "Delete Customer Data",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [910, 150],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM concierge_conversations WHERE sender_id = $1; SELECT 'deleted' AS result;",
+        "options": { "queryReplacement": "={{ $json.phone }}" }
+      },
+      "credentials": { "postgres": { "id": "HanMP7LBOmLC2ipp", "name": "Cabinet PostgreSQL" } }
+    },
+    {
+      "id": "access-data",
+      "name": "Fetch Customer Data",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [910, 300],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT created_at, channel, original_message, ai_response, intent_detected FROM concierge_conversations WHERE sender_id = $1 ORDER BY created_at DESC LIMIT 20;",
+        "options": { "queryReplacement": "={{ $json.phone }}" }
+      },
+      "credentials": { "postgres": { "id": "HanMP7LBOmLC2ipp", "name": "Cabinet PostgreSQL" } }
+    },
+    {
+      "id": "optout-data",
+      "name": "Add to Blocked Senders",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [910, 450],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO blocked_senders (phone_number, reason, blocked_by) VALUES ($1, 'user_opt_out', 'whatsapp_bot') ON CONFLICT (phone_number) DO NOTHING; SELECT 'opted_out' AS result;",
+        "options": { "queryReplacement": "={{ $json.phone }}" }
+      },
+      "credentials": { "postgres": { "id": "HanMP7LBOmLC2ipp", "name": "Cabinet PostgreSQL" } }
+    },
+    {
+      "id": "format-delete-reply",
+      "name": "Format Delete Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1130, 150],
+      "parameters": {
+        "jsCode": "return [{ json: { replyText: '✅ تم حذف بياناتك بنجاح.\\n\\nAll your conversation data has been permanently deleted from our systems as required by Egypt PDPL Law 151/2020.\\n\\nReference: Data deletion request processed at ' + new Date().toISOString() } }];"
+      }
+    },
+    {
+      "id": "format-access-reply",
+      "name": "Format Access Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1130, 300],
+      "parameters": {
+        "jsCode": "const rows = $input.all().map(i => i.json);\nif (!rows.length) {\n  return [{ json: { replyText: 'ℹ️ لا توجد بيانات مخزنة لرقمك.\\n\\nNo stored data found for your number.' } }];\n}\nconst summary = rows.map((r, i) => `${i+1}. [${r.created_at?.substring(0,10)}] ${r.intent_detected || 'inquiry'}: ${(r.original_message||'').substring(0,60)}...`).join('\\n');\nreturn [{ json: { replyText: `📋 بياناتك المخزنة (آخر ${rows.length} رسالة):\\n\\n${summary}\\n\\nTo delete all data, reply: DELETE MY DATA` } }];"
+      }
+    },
+    {
+      "id": "format-optout-reply",
+      "name": "Format Optout Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1130, 450],
+      "parameters": {
+        "jsCode": "return [{ json: { replyText: '⛔ تم تسجيل طلب إيقاف الاشتراك.\\n\\nYou have been opted out. Our bot will no longer process your messages automatically.\\n\\nFor human support, contact us directly. PDPL Art. 12 — Right to Object honored.' } }];"
+      }
+    },
+    {
+      "id": "send-whatsapp-reply",
+      "name": "Send WhatsApp Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1350, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v20.0/1005115859347036/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Content-Type", "value": "application/json" }] },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "messaging_product", "value": "whatsapp" },
+            { "name": "to", "value": "={{ $('Extract Phone + Intent').item.json.phone }}" },
+            { "name": "type", "value": "text" },
+            { "name": "text", "value": "={ \"body\": $json.replyText }" }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": { "httpHeaderAuth": { "id": "meta-bearer-token", "name": "Meta Bearer Token" } }
+    },
+    {
+      "id": "respond-ok",
+      "name": "Respond 200",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1570, 300],
+      "parameters": { "respondWith": "json", "responseBody": "={\"status\":\"ok\"}", "options": {} }
+    }
+  ],
+  "connections": {
+    "WhatsApp Inbound Trigger": { "main": [[{ "node": "Extract Phone + Intent", "type": "main", "index": 0 }]] },
+    "Extract Phone + Intent": { "main": [[{ "node": "Route by Intent", "type": "main", "index": 0 }]] },
+    "Route by Intent": {
+      "main": [
+        [{ "node": "Delete Customer Data", "type": "main", "index": 0 }],
+        [{ "node": "Fetch Customer Data", "type": "main", "index": 0 }],
+        [{ "node": "Add to Blocked Senders", "type": "main", "index": 0 }]
+      ]
+    },
+    "Delete Customer Data": { "main": [[{ "node": "Format Delete Reply", "type": "main", "index": 0 }]] },
+    "Fetch Customer Data": { "main": [[{ "node": "Format Access Reply", "type": "main", "index": 0 }]] },
+    "Add to Blocked Senders": { "main": [[{ "node": "Format Optout Reply", "type": "main", "index": 0 }]] },
+    "Format Delete Reply": { "main": [[{ "node": "Send WhatsApp Reply", "type": "main", "index": 0 }]] },
+    "Format Access Reply": { "main": [[{ "node": "Send WhatsApp Reply", "type": "main", "index": 0 }]] },
+    "Format Optout Reply": { "main": [[{ "node": "Send WhatsApp Reply", "type": "main", "index": 0 }]] },
+    "Send WhatsApp Reply": { "main": [[{ "node": "Respond 200", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "PDPL" }, { "name": "Compliance" }]
+}

@@ -1,0 +1,661 @@
+﻿# â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
+# THE CRAFTERS HUB â€” PRODUCTION DOCKER COMPOSE (Hardened)
+# â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
+# Version: 2.4 (Non-Root Users + Capability Dropping)
+# Updated: 2026-06-18
+# Changes: Secrets via .env, resource limits, health checks, log rotation,
+#          security options (no-new-privileges, cap_drop), pinned versions
+# v2.1: Increased Prometheus (512Mâ†’1G) and cAdvisor (256Mâ†’512M) memory limits
+# v2.2: Added Ollama proxy, fixed Control Panel port conflict (8080â†’8888)
+# v2.3: Removed Ollama proxy â€” host Ollama never installed, no local LLM planned
+# v2.4: Non-root users: appuser (uid=1001) in cabinet-mcp, nginx user in control-panel
+#        cap_drop: ALL on cabinet-mcp, control-panel, grafana, tunnel, github-mcp-server
+#        read_only + tmpfs on github-mcp-server
+# Machine: i5-8400H, 48GB RAM, Quadro P1000 4GB â€” verified March 24, 2026
+# Backup:  docker-compose.yml.pre-hardening-backup
+# â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
+
+services:
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  # THE IRON VAULT (PostgreSQL 15)
+  # Central database â€” all data flows through here
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  postgres:
+    build:
+      context: .
+      dockerfile: Dockerfile.postgres
+    container_name: crafters_hub_postgres
+    hostname: postgres
+
+    # Secrets from .env â€” NEVER hardcoded
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-crafter_admin}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_DB: ${POSTGRES_DB:-thecraftershub}
+      TZ: ${TZ:-Africa/Cairo}
+    secrets:
+      - postgres_password
+
+    ports:
+      - '127.0.0.1:${POSTGRES_PORT:-5432}:5432'
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db_init:/docker-entrypoint-initdb.d
+
+    networks:
+      - crafters-hub-data-net
+
+    restart: unless-stopped
+
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'pg_isready -U ${POSTGRES_USER:-crafter_admin} -d ${POSTGRES_DB:-thecraftershub}',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+    # Logging â€” prevent disk fill
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '100m'
+        max-file: '3'
+
+    # Security hardening
+    security_opt:
+      - no-new-privileges:true
+
+    # Resource limits â€” prevent OOM
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  # THE AUTOMATION ENGINE (n8n)
+  # Workflow orchestration â€” Gordon AI, data sync, content pipeline
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:2.25.7
+    container_name: crafters_hub_n8n
+    hostname: n8n
+
+    environment:
+      # n8n Internal Database â€” SQLite (isolated from business PostgreSQL)
+      # This prevents migration conflicts. n8n workflows still use PostgreSQL via nodes.
+      DB_TYPE: sqlite
+      DB_SQLITE_DATABASE: /home/node/.n8n/database.sqlite
+
+      # Persistence & AI
+      N8N_HOST: localhost
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      N8N_EDITOR_BASE_URL: http://localhost:5678
+      N8N_PATH: /
+      NODE_ENV: production
+      N8N_ENV_VARS_IN_EXPRESSIONS: true
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: false
+      # Allow crypto module in Code nodes (needed for Meta webhook HMAC signature validation)
+      NODE_FUNCTION_ALLOW_BUILTIN: crypto
+      N8N_NODE_JS_TASK_RUNNER_ALLOWED_BUILTINS: crypto
+      # âڑ ï¸ڈ Tunnel URL: configurable via .env. Default = Cloudflare. Override with ngrok if needed.
+      WEBHOOK_URL: ${WEBHOOK_URL:-https://n8n.the-crafters-hub.com/}
+      GENERIC_TIMEZONE: ${TZ:-Africa/Cairo}
+      # C-06 FIX: default 1 (verify TLS). Only override to 0 if META mTLS issues recur.
+      NODE_TLS_REJECT_UNAUTHORIZED: ${NODE_TLS_REJECT_UNAUTHORIZED:-1}
+      AI_MODE: ${AI_MODE:-prod}
+      TZ: ${TZ:-Africa/Cairo}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID}
+      CABINET_API_KEY: ${CABINET_API_KEY}
+      META_ACCESS_TOKEN: ${META_ACCESS_TOKEN}
+      META_APP_SECRET: ${META_APP_SECRET}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_API_KEY_2: ${GEMINI_API_KEY_2}
+      GEMINI_API_KEY_3: ${GEMINI_API_KEY_3}
+      WIX_API_KEY: ${WIX_API_KEY}
+      WIX_SITE_ID: ${WIX_SITE_ID}
+      # Use _FILE variables to read secrets, as supported by n8n
+      GEMINI_API_KEY_FILE: /run/secrets/gemini_api_key
+
+      # Meta Webhooks mTLS deadline (March 31, 2026) fix: Node.js Trust Store override
+      NODE_EXTRA_CA_CERTS: /config/meta_root_ca.pem
+    secrets:
+      - gemini_api_key
+
+    ports:
+      # H-04: localhost-only â€” n8n holds all credentials, must not be LAN-accessible
+      - '127.0.0.1:5678:5678'
+
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./config/meta_root_ca.pem:/config/meta_root_ca.pem:ro
+      - D:\Business_Hub\Finance\invoices:/data/invoices:ro
+
+    networks:
+      - crafters-hub-data-net
+
+    restart: unless-stopped
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    # Health check â€” detect n8n failures
+    healthcheck:
+      test: ['CMD-SHELL', 'wget --spider -q http://localhost:5678/healthz || exit 1']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    # Logging â€” prevent disk fill
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '100m'
+        max-file: '3'
+
+    # Security hardening
+    security_opt:
+      - no-new-privileges:true
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+
+
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  # PROMETHEUS (Metrics Storage)
+  # Monitoring for the entire Cabinet stack
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  prometheus:
+    image: prom/prometheus:v2.51.1
+    container_name: crafters_hub_prometheus
+    hostname: prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/console_templates'
+      - '--web.enable-lifecycle'
+    ports:
+      - '127.0.0.1:9090:9090'
+    networks:
+      - crafters-hub-data-net
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
+
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  # CADVISOR (Container Monitoring)
+  # Tracks CPU/RAM usage of all containers
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: crafters_hub_cadvisor
+    hostname: cadvisor
+    profiles: [monitoring]  # Only start with: docker compose --profile monitoring up -d
+    command:
+      - '-docker_only=true'
+      - '-housekeeping_interval=30s'
+      - '-disable_metrics=disk,tcp,udp,percpu,sched,process'
+    # cAdvisor needs access to the docker socket and host filesystems
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    devices:
+      - /dev/kmsg
+    ports:
+      - '127.0.0.1:8080:8080'
+    networks:
+      - crafters-hub-data-net
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  # NODE EXPORTER (Host Monitoring)
+  # Tracks host machine hardware stats
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  node-exporter:
+    image: prom/node-exporter:v1.8.0
+    container_name: crafters_hub_node_exporter
+    hostname: node-exporter
+    profiles: [monitoring]  # Only start with: docker compose --profile monitoring up -d
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    ports:
+      - '127.0.0.1:9100:9100'
+    networks:
+      - crafters-hub-data-net
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 32M
+
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  # THE CEO DASHBOARD (Metabase)
+  # Business intelligence â€” analytics & reporting
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  metabase:
+    image: metabase/metabase:v0.58.8  # Pinned: verified running version (confirmed via API 2026-04-29). DB schema is at v0.58.8 â€” do NOT downgrade.
+    container_name: crafters_hub_metabase
+    hostname: metabase
+
+    # Secrets from .env â€” NEVER hardcoded
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_DBNAME: ${POSTGRES_DB:-thecraftershub}
+      MB_DB_PORT: 5432
+      MB_DB_USER: ${POSTGRES_USER:-crafter_admin}
+      MB_DB_PASS_FILE: /run/secrets/postgres_password
+      MB_DB_HOST: postgres
+      MB_JAVA_TOOL_OPTIONS: '-Xmx1.5g -Xms512m'
+      MB_SESSION_COOKIES: 'true'
+      TZ: ${TZ:-Africa/Cairo}
+    secrets:
+      - postgres_password
+
+    ports:
+      # H-05: localhost-only â€” Metabase has full SQL access to production DB
+      - '127.0.0.1:3000:3000'
+
+    volumes:
+      - metabase_data:/metabase-data
+
+    networks:
+      - crafters-hub-data-net
+
+    restart: unless-stopped
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    # Health check â€” detect Metabase failures
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -f http://localhost:3000/api/health || exit 1']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+
+    # Logging â€” prevent disk fill
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '100m'
+        max-file: '3'
+
+    # Security hardening
+    security_opt:
+      - no-new-privileges:true
+
+    # Resource limits (Metabase is Java â€” needs more memory)
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+          cpus: '2'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  # GITHUB MCP SERVER (AI Agent Bridge)
+  # Provides GitHub API access for AI agents (Antigravity, Gemini CLI)
+  # Updated: March 9, 2026 â€” Added health check for monitoring
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  github-mcp-server:
+    image: ghcr.io/github/github-mcp-server:v0.4.0  # M-08: pinned â€” never :latest in production
+    container_name: github_mcp_server
+    stdin_open: true
+    tty: true
+
+    environment:
+      GITHUB_PERSONAL_ACCESS_TOKEN: ${GITHUB_PERSONAL_ACCESS_TOKEN}
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+
+    networks:
+      - crafters-hub-data-net
+
+    restart: unless-stopped
+
+    # Health check â€” Removed because ghcr.io distroless image lacks /bin/sh and wget.
+
+    # Logging â€” prevent disk fill
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+    # Security hardening
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+
+
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  # THE CABINET MCP SERVER (Hive-Mind Bridge)
+  # Exposes the PostgreSQL pgvector memory exclusively to AI agents
+  # Added: March 19, 2026 â€” Phase 3 of Architecture Master Plan
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  cabinet-mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp
+    container_name: crafters_hub_cabinet_mcp
+    ports:
+      - '127.0.0.1:8000:8000'
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      # C-03: use env var substitution â€” consistent with all other services
+      POSTGRES_USER: ${POSTGRES_USER:-crafter_admin}
+      POSTGRES_DB: ${POSTGRES_DB:-thecraftershub}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      GEMINI_API_KEY_FILE: /run/secrets/gemini_api_key
+      CABINET_API_KEY: ${CABINET_API_KEY}
+      # I-06 FIX: default production â€” API was open mode when .env did not set this
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+    secrets:
+      - postgres_password
+      - gemini_api_key
+    networks:
+      - crafters-hub-data-net
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '10m'
+        max-file: '3'
+    security_opt:
+      - no-new-privileges:true
+    # Non-root: appuser uid=1001 set in Dockerfile.mcp
+    user: "1001:1001"
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+
+
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  # THE CONTROL CENTER (React Dashboard)
+  # Unified control panel for all Cabinet services
+  # Added: March 23, 2026 â€” Unified UI for workshop management
+  # Port: 8888 (changed from 8080 to avoid cAdvisor conflict)
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  control-panel:
+    build:
+      context: ./control-panel
+      dockerfile: Dockerfile
+    container_name: crafters_hub_control_panel
+    hostname: control-panel
+
+    # C-01/C-02: Keys injected here -> envsubst fills nginx.conf.template at runtime (never baked into image)
+    environment:
+      CABINET_API_KEY: ${CABINET_API_KEY}
+      N8N_API_KEY: ${N8N_API_KEY}
+
+    ports:
+      - '8888:80'
+
+    networks:
+      - crafters-hub-data-net
+
+    restart: unless-stopped
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      n8n:
+        condition: service_started   # nginx serves static files; no need to wait for n8n healthy
+      metabase:
+        condition: service_started   # Metabase takes 120s+ to become healthy â€” don't block nginx
+      grafana:
+        condition: service_started   # Same â€” nginx doesn't depend on grafana being ready
+
+    # Health check
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -f http://localhost:80/ || exit 1']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    # Logging
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '50m'
+        max-file: '3'
+
+    # Security hardening
+    security_opt:
+      - no-new-privileges:true
+    # nginx workers need SETGID/SETUID to drop privileges from root â†’ nginx user
+    # cap_drop:ALL breaks setgid() â€” workers crash with fatal code 2
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETGID
+      - SETUID
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+        reservations:
+          memory: 64M
+          cpus: '0.1'
+
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  # THE NERVOUS SYSTEM (Grafana)
+  # Infrastructure monitoring & alerting â€” observability for The Cabinet
+  # Added: March 11, 2026 â€” Phase 2 of Architecture Master Plan
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  grafana:
+    image: grafana/grafana:10.4.1
+    container_name: crafters_hub_grafana
+    hostname: grafana
+
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-crafter_admin}
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_INSTALL_PLUGINS: 'grafana-clock-panel,grafana-simple-json-datasource'
+      GF_SERVER_ROOT_URL: http://localhost:8888/proxy/grafana/
+      GF_SERVER_SERVE_FROM_SUB_PATH: 'true'
+      TZ: ${TZ:-Africa/Cairo}
+    secrets:
+      - grafana_admin_password
+
+    ports:
+      - '${GRAFANA_PORT:-3001}:3000'
+
+    volumes:
+      - grafana_data:/var/lib/grafana
+
+    networks:
+      - crafters-hub-data-net
+
+    restart: unless-stopped
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    # Health check â€” detect Grafana failures
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -f http://localhost:3000/api/health || exit 1']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    # Logging â€” prevent disk fill
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '50m'
+        max-file: '3'
+
+    # Security hardening
+    security_opt:
+      - no-new-privileges:true
+    # Grafana already runs as uid 472 â€” cap_drop safe
+    cap_drop:
+      - ALL
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# THE BRIDGE (Cloudflare Tunnel)
+# Exposes The Cabinet to Meta and the public internet securely
+# Added: March 27, 2026 â€” Phase 8 Preparation
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  tunnel:
+    image: cloudflare/cloudflared:2024.12.2  # Security: pinned â€” never use :latest in production
+    container_name: crafters_hub_tunnel
+    restart: unless-stopped
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
+    # --protocol http2 fallback: prevents QUIC timeout loop when UDP is blocked by ISP/firewall
+    # cloudflared tries QUIC first, falls back to HTTP/2 over TCP automatically
+    command: tunnel --no-autoupdate --protocol http2 run
+    networks:
+      - crafters-hub-data-net
+    # Health check â€” liveness probe using cloudflared version.
+    # The image is distroless (no /bin/sh/wget). CMD-SHELL and tunnel info both fail.
+    # cloudflared version exits 0 if the binary is functional â€” reliable liveness check.
+    # Note: does NOT verify tunnel connectivity, only that the container process is alive.
+    healthcheck:
+      test: ['CMD', 'cloudflared', 'version']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '50m'
+        max-file: '3'
+    security_opt:
+      - no-new-privileges:true
+    # Already runs as nonroot user â€” cap_drop is the final layer
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+        reservations:
+          memory: 64M
+          cpus: '0.1'
+
+# â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
+# VOLUMES â€” Named volumes (data persisted in Docker's internal storage)
+# â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
+volumes:
+  postgres_data:
+  n8n_data:
+  metabase_data:
+  grafana_data:
+  prometheus_data:
+
+# â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
+# NETWORKS â€” Service communication
+# â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
+networks:
+  crafters-hub-data-net:
+    driver: bridge
+
+# â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
+# SECRETS â€” For managing sensitive data securely
+# â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password.txt
+  grafana_admin_password:
+    file: ./secrets/grafana_admin_password.txt
+  github_pat:
+    file: ./secrets/github_pat.txt
+  gemini_api_key:
+    file: ./secrets/gemini_api_key.txt
+
+

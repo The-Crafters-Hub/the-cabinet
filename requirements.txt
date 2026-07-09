@@ -1,0 +1,27 @@
+# requirements.txt — The Cabinet MCP + FastAPI Server
+# M-04: All versions pinned for reproducible builds.
+# To update: test in sandbox, bump versions here, rebuild image.
+# Last verified: June 2026
+
+# PostgreSQL driver + pgvector client
+psycopg2-binary==2.9.9
+pgvector==0.3.6
+
+# Google Gemini SDK (used for text-embedding-004 + generateContent)
+google-genai==1.16.1
+
+# Environment variable loading
+python-dotenv==1.0.1
+
+# MCP (Model Context Protocol) server framework
+mcp==1.9.0
+
+# FastAPI + ASGI server
+fastapi==0.115.12
+uvicorn==0.34.3
+
+# Data validation
+pydantic==2.11.5
+
+# M-03: Prometheus metrics — exposes /metrics endpoint for Grafana dashboards
+prometheus-fastapi-instrumentator==7.0.2

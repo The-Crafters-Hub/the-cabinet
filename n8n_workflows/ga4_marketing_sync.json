@@ -1,0 +1,146 @@
+{
+  "name": "Cabinet: Marketing GA4 Sync (Daily)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 1 * * *"
+            }
+          ]
+        }
+      },
+      "id": "e2f1f0a1-d703-4f9e-b816-1f34f54ed9d1",
+      "name": "Schedule (1:00 AM Daily)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "propertyId": "",
+        "dateRanges": {
+          "dateRange": [
+            {
+              "startDate": "yesterday",
+              "endDate": "yesterday"
+            }
+          ]
+        },
+        "metrics": {
+          "metric": [
+            {
+              "name": "activeUsers"
+            },
+            {
+              "name": "sessions"
+            }
+          ]
+        },
+        "dimensions": {
+          "dimension": [
+            {
+              "name": "date"
+            }
+          ]
+        }
+      },
+      "id": "c62a8b9a-41e3-4c9f-8a02-2f3b9c8d7e6f",
+      "name": "Google Analytics 4",
+      "type": "n8n-nodes-base.googleAnalytics",
+      "typeVersion": 2,
+      "position": [
+        420,
+        300
+      ],
+      "credentials": {
+        "googleAnalyticsOAuth2Api": {
+          "id": "CREATE_THIS_IN_UI",
+          "name": "GA4 Marketing Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = [];\nconst logDate = item.date.replace(/(\\d{4})(\\d{2})(\\d{2})/, '$1-$2-$3');\n\nif (item.metricValues && item.metricValues.length >= 2) {\n  results.push({\n    log_date: logDate,\n    platform: 'ga4',\n    metric_name: 'activeUsers',\n    metric_value: parseFloat(item.metricValues[0].value)\n  });\n  results.push({\n    log_date: logDate,\n    platform: 'ga4',\n    metric_name: 'sessions',\n    metric_value: parseFloat(item.metricValues[1].value)\n  });\n}\n\nreturn results;"
+      },
+      "id": "1d4a5f6e-7b8c-4a9d-b2e1-c3f4a5b6c7d8",
+      "name": "Format Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": "public",
+        "table": "marketing_metrics",
+        "columns": "log_date, platform, metric_name, metric_value",
+        "options": {}
+      },
+      "id": "8e9f0a1b-2c3d-4e5f-a6b7-c8d9e0f1a2b3",
+      "name": "PostgreSQL",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.2,
+      "position": [
+        860,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "Cabinet_PostgreSQL",
+          "name": "Cabinet PostgreSQL"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule (1:00 AM Daily)": {
+      "main": [
+        [
+          {
+            "node": "Google Analytics 4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Analytics 4": {
+      "main": [
+        [
+          {
+            "node": "Format Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Data": {
+      "main": [
+        [
+          {
+            "node": "PostgreSQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "f781eaed-b570-4fc7-bf8d-d779df3bb2b4"
+}

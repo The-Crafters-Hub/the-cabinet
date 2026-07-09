@@ -1,0 +1,124 @@
+{
+  "id": "qrewriter-tconcierge-v2",
+  "name": "Query Rewriter (Gemini 3.5 Flash — Structured) - TCH Concierge Pre-Processor",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "concierge-rewrite",
+        "httpMethod": "POST",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "fdca81ca-2715-4165-85cd-73fe989ce8c0",
+      "name": "Rewrite Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "78f0eba2-37dd-47a7-a4f1-52d599643e04"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={{ $env.GEMINI_API_KEY }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ contents: [{ parts: [{ text: 'You are a query rewriter for The Crafters Hub, a premium woodworking workshop in Alexandria, Egypt. Your job is to take raw customer messages (which may be in Arabic, English, or Franco-Arabic) and rewrite them into a clean, searchable English query optimized for vector similarity search against our knowledge base.\\n\\nRules:\\n1. Translate Arabic/Franco-Arabic to English\\n2. Remove greetings, filler words, emojis\\n3. Extract the core intent (booking, pricing, schedule, course_info, complaint, general, greeting)\\n4. Output ONLY valid JSON matching the schema\\n\\nExamples:\\n- \"\u0627\u0644\u0633\u0644\u0627\u0645 \u0639\u0644\u064a\u0643\u0645\u060c \u0639\u0627\u064a\u0632 \u0623\u0639\u0631\u0641 \u0623\u0633\u0639\u0627\u0631 \u0627\u0644\u0643\u0648\u0631\u0633\u0627\u062a\" \u2192 {\"rewritten_query\":\"woodworking course pricing\",\"is_greeting\":false,\"detected_language\":\"ar\",\"intent\":\"pricing\"}\\n- \"hi do you have classes on friday\" \u2192 {\"rewritten_query\":\"class schedule friday availability\",\"is_greeting\":false,\"detected_language\":\"en\",\"intent\":\"schedule\"}\\n- \"\u0645\u0631\u062d\u0628\u0627\" \u2192 {\"rewritten_query\":\"GREETING_ONLY\",\"is_greeting\":true,\"detected_language\":\"ar\",\"intent\":\"greeting\"}\\n\\nNow process this message:\\n' + $json.body.message }] }], generationConfig: { maxOutputTokens: 150, temperature: 0.1, responseMimeType: 'application/json', responseSchema: { type: 'object', properties: { rewritten_query: { type: 'string' }, is_greeting: { type: 'boolean' }, detected_language: { type: 'string', enum: ['ar', 'en', 'franco-ar', 'mixed'] }, intent: { type: 'string', enum: ['booking', 'pricing', 'schedule', 'course_info', 'complaint', 'general', 'greeting'] } }, required: ['rewritten_query', 'is_greeting'] } } }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "7dce304f-d5f4-44c3-8d08-d03e1d8f1a1f",
+      "name": "Rewrite Query (AI Studio — Structured)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Structured output: Gemini guarantees JSON — no fragile text parsing\nconst raw = $input.first().json;\nconst rawText = raw.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '{}';\n\nlet parsed;\ntry {\n  parsed = JSON.parse(rawText);\n} catch (e) {\n  parsed = { rewritten_query: 'REWRITE_FAILED', is_greeting: false, detected_language: 'unknown', intent: 'general' };\n}\n\nreturn [{\n  json: {\n    original_message: $('Rewrite Webhook').first().json.body.message,\n    rewritten_query: parsed.rewritten_query || 'REWRITE_FAILED',\n    is_greeting: parsed.is_greeting === true,\n    detected_language: parsed.detected_language || $('Rewrite Webhook').first().json.body.language || 'auto',\n    intent: parsed.intent || 'general',\n    channel: $('Rewrite Webhook').first().json.body.channel || 'api',\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "98a2e28f-9af3-4e81-88b7-9d22ecd95de8",
+      "name": "Parse Rewritten Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "40dfcd8d-64ab-40a7-9503-5ba451d627e3",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        920,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Rewrite Webhook": {
+      "main": [
+        [
+          {
+            "node": "Rewrite Query (AI Studio — Structured)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Rewritten Query": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rewrite Query (AI Studio — Structured)": {
+      "main": [
+        [
+          {
+            "node": "Parse Rewritten Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "description": "Pre-processes raw customer messages for the AI Concierge. Translates Arabic/Franco-Arabic, strips noise, extracts structured JSON (rewritten_query, is_greeting, detected_language, intent). Uses Google AI Studio gemini-3.5-flash — FREE tier, no Vertex/Bearer token needed. POST /webhook/concierge-rewrite { message: '...', channel: 'whatsapp'|'web' }"
+  },
+  "tags": [
+    {
+      "name": "concierge"
+    },
+    {
+      "name": "ai-preprocessing"
+    },
+    {
+      "name": "production"
+    }
+  ]
+}

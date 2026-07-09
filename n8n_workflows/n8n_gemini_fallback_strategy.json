@@ -1,0 +1,155 @@
+{
+  "name": "Gemini Fallback Strategy — TCH Resilient AI Router",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "ai-resilient",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "resilient-webhook",
+      "name": "Resilient Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={{ $env.GEMINI_API_KEY }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ contents: [{ parts: [{ text: $json.body.prompt }] }], generationConfig: { maxOutputTokens: $json.body.max_tokens || 512, temperature: $json.body.temperature || 0.7 } }) }}",
+        "options": { "timeout": 15000 }
+      },
+      "id": "primary-gemini",
+      "name": "Primary: Gemini 3.5 Flash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 200],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.candidates ? true : false }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ]
+        }
+      },
+      "id": "check-primary",
+      "name": "Primary OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [700, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key={{ $env.GEMINI_API_KEY }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ contents: [{ parts: [{ text: $('Resilient Webhook').first().json.body.prompt }] }], generationConfig: { maxOutputTokens: 256, temperature: 0.5 } }) }}",
+        "options": { "timeout": 15000 }
+      },
+      "id": "fallback-lite",
+      "name": "Fallback: Gemini 3.1 Flash-Lite",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [920, 400],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.candidates ? true : false }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ]
+        }
+      },
+      "id": "check-fallback",
+      "name": "Fallback OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1140, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ source: 'gemini-3.5-flash', response: $json.candidates[0].content.parts[0].text, fallback_used: false }) }}",
+        "options": {}
+      },
+      "id": "respond-primary",
+      "name": "Respond (Primary)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [920, 100]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ source: 'gemini-3.1-flash-lite', response: $json.candidates[0].content.parts[0].text, fallback_used: true, fallback_level: 1 }) }}",
+        "options": {}
+      },
+      "id": "respond-fallback",
+      "name": "Respond (Fallback)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1360, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ source: 'graceful_error', response: 'I apologize, our AI services are temporarily unavailable. Please try again shortly or contact us at +20 111 377 6666.', fallback_used: true, fallback_level: 2 }) }}",
+        "options": {}
+      },
+      "id": "respond-error",
+      "name": "Respond (Graceful Error)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1360, 500]
+    }
+  ],
+  "connections": {
+    "Resilient Webhook": {
+      "main": [[{ "node": "Primary: Gemini 3.5 Flash", "type": "main", "index": 0 }]]
+    },
+    "Primary: Gemini 3.5 Flash": {
+      "main": [[{ "node": "Primary OK?", "type": "main", "index": 0 }]]
+    },
+    "Primary OK?": {
+      "main": [
+        [{ "node": "Respond (Primary)", "type": "main", "index": 0 }],
+        [{ "node": "Fallback: Gemini 3.1 Flash-Lite", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fallback: Gemini 3.1 Flash-Lite": {
+      "main": [[{ "node": "Fallback OK?", "type": "main", "index": 0 }]]
+    },
+    "Fallback OK?": {
+      "main": [
+        [{ "node": "Respond (Fallback)", "type": "main", "index": 0 }],
+        [{ "node": "Respond (Graceful Error)", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "meta": {
+    "description": "2-tier resilient AI router: Gemini 3.5 Flash → Gemini 3.1 Flash-Lite → Graceful error. All via Google AI Studio (free tier). POST /webhook/ai-resilient { prompt: '...', max_tokens: 512 }"
+  },
+  "tags": [
+    { "name": "ai-routing" },
+    { "name": "resilience" },
+    { "name": "production" }
+  ],
+  "id": "fb-2033"
+}

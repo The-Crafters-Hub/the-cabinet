@@ -1,0 +1,33 @@
+# Exclude large data directories — prevents 900MB build context
+Cabinet_KB_Live/
+n8n_workflows/
+data/
+backups/
+*.sql.gz
+*.dump
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Logs & temp
+*.log
+.DS_Store
+
+# Secrets — never in image
+.env
+secrets/
+D:/S3cr3t5/
+
+# Dev tools
+.git/
+.agents/
+docs/
+tests/
+
+# Control panel (different build context)
+control-panel/
