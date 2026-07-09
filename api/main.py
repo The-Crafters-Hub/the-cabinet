@@ -586,7 +586,7 @@ async def concierge_chat(
         "generationConfig": {"maxOutputTokens": 512, "temperature": 0.3}
     }).encode("utf-8")
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={GEMINI_KEY}"
     req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
 
     try:
@@ -632,7 +632,7 @@ async def submit_technique(
 ):
     """
     Archive a traditional artisan technique.
-    Gemini 2.5 Flash extracts structured data from the raw submission text.
+    Gemini 3.5 Flash extracts structured data from the raw submission text.
     If a WhatsApp photo URL is provided, Gemini performs multimodal analysis.
     Falls back gracefully — raw text is always stored even if Gemini fails.
     """
@@ -673,7 +673,7 @@ async def submit_technique(
     try:
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/"
-            f"gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
+            f"gemini-3.5-flash:generateContent?key={GEMINI_KEY}"
         )
 
         parts = [{"text": extraction_prompt}]
